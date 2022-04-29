@@ -1,0 +1,322 @@
+---
+title: "Chapter Notes"
+output:
+  html_document:
+    df_print: paged
+---
+
+These notes follow the book [Bayesian Networks
+with Examples in R](https://www.bnlearn.com/book-crc-2ed/) by Marco Scutari and Jean Baptiste Denis.
+
+```{r libraries, message=FALSE}
+library(lattice)
+library(gridExtra)
+library(gRain)
+library(Rgraphviz)
+library(bnlearn)
+```
+
+
+# Chapter 1
+
+## Train-Use Survey Example
+
+### Variables
+* Age (A): the age, recorded as young (young) for individuals below 30 years  old, adult (adult) for individuals between 30 and 60 years old, and old  (old) for people older than 60.
+
+* Sex (S): the biological sex, recorded as male (M) or female (F).
+
+* Education (E): the highest level of education or training successfully  completed, recorded as up to high school (high) or university degree (uni).  
+
+* Occupation (O): whether the individual is an employee (emp) or a selfemployed (self) worker.  
+
+* Residence (R): the size of the city the individual lives in, recorded as  either small (small) or big (big).
+
+* Travel (T): the means of transport favoured by the individual, recorded  either as car (car), train (train) or other (other). 
+
+### Basic Model
+Here we establish the basic directed acyclical graph (DAG)
+
+```{r basic-model}
+#Nodes
+dag <- empty.graph(nodes = c("A", "S", "E", "O", "R", "T"))
+
+#Arcs
+dag <- set.arc(dag, from = "A", to = "E")
+dag <- set.arc(dag, from = "S", to = "E")
+dag <- set.arc(dag, from = "E", to = "O")
+dag <- set.arc(dag, from = "E", to = "R")
+dag <- set.arc(dag, from = "O", to = "T")
+dag <- set.arc(dag, from = "R", to = "T")
+dag
+```
+
+### Creating Probability Tables from Subject Matter Expert Elicitation
+
+ One way to generate a conditional probability table is to elecit subjective probabilities from experts. Below is the method to do this in the `bnlearn` package.
+ 
+```{r manual-probabilities}
+#level sets
+A.lv <- c("young", "adult", "old")
+S.lv <- c("M", "F")
+E.lv <- c("high", "uni")
+O.lv <- c("emp", "self")
+R.lv <- c("small", "big")
+T.lv <- c("car", "train", "other")
+
+#Nodes A and S
+A.prob <- array(c(0.30, 0.50, 0.20), dim = 3, dimnames = list(A = A.lv))
+A.prob
+S.prob <- array(c(0.60, 0.40), dim = 2, dimnames = list(S = S.lv))
+S.prob
+
+#Nodes O and R
+O.prob <- array(c(0.96, 0.04, 0.92, 0.08), dim = c(2, 2),
+            dimnames = list(O = O.lv, E = E.lv))
+O.prob
+R.prob <- array(c(0.25, 0.75, 0.20, 0.80), dim = c(2, 2),
+            dimnames = list(R = R.lv, E = E.lv))
+R.prob
+
+#Nodes E and T
+E.prob <- array(c(0.75, 0.25, 0.72, 0.28, 0.88, 0.12, 0.64, 0.36, 0.70,
+                  0.30, 0.90, 0.10), dim = c(2, 3, 2),
+            dimnames = list(E = E.lv, A = A.lv, S = S.lv))
+
+T.prob <- array(c(0.48, 0.42, 0.10, 0.56, 0.36, 0.08, 0.58, 0.24, 0.18,
+                  0.70, 0.21, 0.09), dim = c(3, 2, 2),
+            dimnames = list(T = T.lv, O = O.lv, R = R.lv))
+
+```
+ 
+#### Fit the Model
+```{r custom-fit}
+cpt <- list(A = A.prob, S = S.prob, E = E.prob, O = O.prob, R = R.prob,
+         T = T.prob)
+bn <- custom.fit(dag, cpt)
+
+
+#print-number-of-parameters
+nparams(bn)
+
+
+#print-arcs-fitted
+arcs(bn)
+
+
+#print-fitted-node-R
+bn$R
+
+
+#extract-probabilities-node-R
+R.cpt <- coef(bn$R)
+```
+
+### Fitting a model from data
+Conversely, we can also estimated the network parameters from a table of data.
+
+#### Maximum Likelihood Method (pages 10-11)
+In essence, this method builds proportion tables based on the number of observations within the data.
+
+```{r mle-method}
+
+#read-survey-data
+survey <- read.table("data/survey.txt", header = TRUE, colClasses = "factor")
+
+
+#head-survey-data
+head(survey)
+
+
+#maximum-likelihood-fit
+bn.mle <- bn.fit(dag, data = survey, method = "mle")
+
+#create-cpt-manually-O-E
+prop.table(table(survey[, c("O", "E")]), margin = 2)
+
+
+#print-O-from-fitted
+bn.mle$O
+
+```
+
+# Risk Assessment Book Chapter 7
+## Example 7.1
+### Set up the model
+```{r train-model}
+#Nodes
+train_dag <- empty.graph(nodes = c("T", "N"))
+
+#Arcs
+train_dag <- set.arc(train_dag, from = "T", to = "N")
+
+#level sets
+T.lv <- c("False", "True")
+N.lv <- c("False", "True")
+
+#Probabilities
+T.prob <- array(c(0.9, 0.1), dim = 2, dimnames = list(T = T.lv))
+T.prob
+
+
+N.prob <- array(c(0.9, 0.1, 0.2, 0.8), dim = c(2, 2),
+            dimnames = list(N = N.lv, T = T.lv))
+N.prob
+
+```
+
+
+### Fit the Model
+```{r train-fit}
+train_cpt <- list(N = N.prob, T = T.prob)
+train_bn <- custom.fit(train_dag, train_cpt)
+
+
+#print-number-of-parameters
+nparams(train_bn)
+
+
+#print-arcs-fitted
+arcs(train_bn)
+
+
+#print-fitted-node-N
+train_bn$N
+
+
+#extract-probabilities-node-R
+train_N.cpt <- coef(train_bn$N)
+train_N.cpt
+```
+
+
+### Extract Probabilities
+```{r train-extraction}
+junction <- compile(as.grain(train_bn))
+
+```
+
+#### Q1. What is the marginal unconditional probability that Norman is late?
+```{r norman-late}
+querygrain(junction, nodes = "N")$N
+```
+Based on the model Norman has a $17\%$ chance of being late. You can calculate this by hand by doing the following:
+
+\begin{align}
+P(N = True) &= P(N = True | T = True)P(T = True) + P(N = True | T = False)P(T = False)\\
+&= 0.8 \times 0.1 + 0.1 \times 0.9\\
+&= 0.17
+\end{align}
+
+##### View the model
+```{r train-graph}
+graphviz.chart(train_bn, type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+
+```
+
+#### Q2. What is the probability of a train strike given we observe Norman being late?
+```{r train-strike}
+strike_res <- setEvidence(junction, nodes = "N", states = "True")
+querygrain(strike_res, nodes = "T")$T
+```
+
+Thus, knowing that Norman is late leads to an increase in probability of a train strike from $10\%$ to $47\%$. The calculation for this is:
+
+\begin{align}
+P(T = True | N = True) &= \frac{P(N = True | T = True)P(T = True)}{P(N = True)}\\
+&= \frac{0.8 \times 0.1}{0.17}\\
+&= 0.4705882
+\end{align}
+
+##### View the model
+```{r train-graph-evidence}
+graphviz.chart(as.bn.fit(strike_res, including.evidence = TRUE), type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+
+```
+
+## Expanded Model
+### Set up the model
+```{r train-model-extended}
+#Nodes
+train_extended_dag <- empty.graph(nodes = c("O","T", "M", "N"))
+
+#Arcs
+train_arc_set <- matrix(c("O", "M",
+                          "T", "M",
+                          "T", "N"),
+                        byrow = TRUE,
+                        ncol = 2,
+                        dimnames = list(NULL, c("from", "to")))
+arcs(train_extended_dag) <- train_arc_set
+
+#level sets
+O.lv <- c("False", "True")
+T.lv <- c("False", "True")
+M.lv <- c("False", "True")
+N.lv <- c("False", "True")
+
+#Probabilities
+O.prob <- array(c(0.6, 0.4), dim = 2, dimnames = list(O = O.lv))
+O.prob
+
+T.prob <- array(c(0.9, 0.1), dim = 2, dimnames = list(T = T.lv))
+T.prob
+
+M.prob <- array(c(0.7, 0.3, 0.4, 0.6, 0.4, 0.6, 0.2, 0.8), dim = c(2, 2, 2),
+            dimnames = list(M = M.lv, T = T.lv, O = O.lv))
+M.prob
+
+
+N.prob <- array(c(0.9, 0.1, 0.2, 0.8), dim = c(2, 2),
+            dimnames = list(N = N.lv, T = T.lv))
+N.prob
+
+```
+
+### Fit the Model
+```{r train-fit-extended}
+train_extended_cpt <- list(N = N.prob, T = T.prob, O = O.prob, M = M.prob)
+train_extended_bn <- custom.fit(train_extended_dag, train_extended_cpt)
+```
+
+##### View the model
+```{r train-graph-extended}
+graphviz.chart(train_extended_bn, type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+
+```
+
+### What is the probability of Martin being late given evidence that Norman is late?
+```{r train-extraction-extended}
+extended_junction <- compile(as.grain(train_extended_bn))
+norm_late <- setEvidence(extended_junction, nodes = "N", states = "True")
+querygrain(norm_late, nodes = "M")$M
+```
+##### View the model
+```{r train-graph-evidence-extended}
+graphviz.chart(as.bn.fit(norm_late, including.evidence = TRUE), type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+
+```
+
+It is interesting to note that if we only know that Norman is late, then there is a chance that Martin is late as well and it is due to the strike due to the divergent connections these nodes have to the train strike node.
+
+### What does the network look like if only Martin is late?
+```{r train-martin-late}
+martin_late <- setEvidence(extended_junction, nodes = "M", states = "True")
+graphviz.chart(as.bn.fit(martin_late, including.evidence = TRUE), type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+```
+
+Now if only Martin is late, the odds of a strike slightly increase, but the most likely reason he is late is oversleeping. 
+
+### What does the network look like if both Martin and Norman are late?
+```{r both-late}
+both_late <- setEvidence(extended_junction, nodes = c("M","N"), states = c("True", "True"))
+graphviz.chart(as.bn.fit(both_late, including.evidence = TRUE), type = "barprob", grid = TRUE, bar.col = "green",
+  strip.bg = "lightyellow")
+```
+
+With both Martin and Norman being late, it is most likely that there was a train strike, however, we cannot fully eliminate that Martin could have overslept as well. 
